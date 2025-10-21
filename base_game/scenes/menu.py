@@ -1,4 +1,3 @@
-# base_game/scenes/menu.py
 from .base import BaseScene
 from .. import config
 
