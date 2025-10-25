@@ -6,23 +6,21 @@ from pgzero.loaders import images as pgz_images
 TILE = 32
 TOP_CAP_H = 72              
 EXTRA_WALL_TOP = TOP_CAP_H - TILE   
-_SIDE = None
-_BOTTOM = None
-_TOP_END_L = None
-_TOP_END_R = None
-_BOTTOM_END = None
+
 
 class Tile(IntEnum):
     FLOOR = 0
     WALL  = 1
     DOOR  = 2
     VOID  = 3 
+    HALL  = 4
 
 PROPS = {
     Tile.FLOOR: {"solid": False, "sprite": "floor"},
     Tile.WALL:  {"solid": True,  "sprite": "wall"},
     Tile.DOOR:  {"solid": False, "sprite": "door"},
     Tile.VOID:  {"solid": False, "sprite": None},  
+    Tile.HALL:  {"solid": False, "sprite": "floor_hall1"},
 
 }
 
@@ -38,138 +36,100 @@ CHARSET = {
     "P": Tile.FLOOR,
 }
 
-_IMAGE_CACHE = {}
-
-def _load_sprite(name: str):
-    if not name:
-        return None
-    if name in _IMAGE_CACHE:
-        return _IMAGE_CACHE[name]
-    try:
-        spr = pgz_images.load(name)          
-        _IMAGE_CACHE[name] = spr             
-        print(f"[SPRITE] loaded '{name}.png'")
-        return spr
-    except Exception as e:
-        print(f"[SPRITE] MISSING '{name}.png' → fallback color. ({e})")
-        _IMAGE_CACHE[name] = None
-        return None
 
 def draw_tile(ctx, tid: int, x: int, y: int):
-    from pygame import Rect
     t = Tile(tid)
 
-    if t == Tile.VOID:
+    if t in (Tile.VOID, Tile.WALL, Tile.DOOR):
         return
 
-    if t == Tile.WALL:
-        return  
-
-    if t == Tile.FLOOR:
+    if t in (Tile.FLOOR, Tile.HALL):
         name = PROPS.get(t, {}).get("sprite") or "floor"
         try:
-            spr = ctx.images.load(name)
+            spr = ctx.images.load(name)   
             ctx.screen.blit(spr, (x, y))
         except Exception:
             ctx.screen.draw.filled_rect(Rect(x, y, TILE, TILE), (35, 35, 35))
         return
 
-    if t == Tile.DOOR:
-        name = PROPS.get(t, {}).get("sprite") or "door"
-        try:
-            spr = ctx.images.load(name)
-            ctx.screen.blit(spr, (x, y))
-        except Exception:
-            ctx.screen.draw.filled_rect(Rect(x, y, TILE, TILE), (140, 120, 40))
-        return
-
     ctx.screen.draw.filled_rect(Rect(x, y, TILE, TILE), (255, 0, 255))
 
 def draw_wall_side_12x32(ctx, x, y, side):
-
-    global _SIDE
-    if _SIDE is None:
-        _SIDE = _try_load(ctx, "wall_side_12x32")
-    if not _SIDE:
-        return
+    SIDE_OFFSET = 43  
+    spr = None
 
     if side == "L":
-        ctx.screen.blit(_SIDE, (x + (TILE - 12), y)) 
-    else:  
-        ctx.screen.blit(_SIDE, (x, y))
+        spr = _try_load(ctx, "wall_side_left_32x76")
+        if not spr:
+            return
+        ox = x - SIDE_OFFSET
 
+    elif side == "R":
+        spr = _try_load(ctx, "wall_side_right_32x76")
+        if not spr:
+            return
+        ox = x + TILE - spr.get_width() + SIDE_OFFSET
+
+    else:
+        return
+
+    oy = y - (spr.get_height() - TILE)
+    ctx.screen.blit(spr, (ox, oy))
+        
 def draw_wall_bottom(ctx, x, y):
-
-    global _BOTTOM
-    if _BOTTOM is None:
-        _BOTTOM = _try_load(ctx, "wall_side_bottom") 
-    if not _BOTTOM:
-        return
-
-    w = _BOTTOM.get_width()
-    h = _BOTTOM.get_height()
-
-    ox = x + (TILE - w) // 2
-    oy = y
-
-    ctx.screen.blit(_BOTTOM, (ox, oy))
-
-def draw_wall_bottom_end(ctx, x, y, side):
-
-    global _BOTTOM_END
-    if _BOTTOM_END is None:
-        _BOTTOM_END = _try_load(ctx, "margins_bottom_12x12") 
-    if not _BOTTOM_END:
-        return
-
-    w = _BOTTOM_END.get_width()
-    h = _BOTTOM_END.get_height()
-
-    oy = y
-    if side == "L":
-        ox = x - w
-    else:  # "R"
-        ox = x + TILE
-    ctx.screen.blit(_BOTTOM_END, (ox, oy))
-
-def draw_wall_top_end(ctx, x, y, side):
-
-    global _TOP_END_L, _TOP_END_R
-
-    if side == "L":
-        if _TOP_END_L is None:
-            _TOP_END_L = _try_load(ctx, "margins-top")
-        spr = _TOP_END_L
-    else:  # "R"
-        if _TOP_END_R is None:
-            _TOP_END_R = _try_load(ctx, "margins-top")
-        spr = _TOP_END_R
-
+    spr = _try_load(ctx, "wall_side_bottom_32x76")
     if not spr:
         return
 
-    extra = get_extra_wall_top(ctx)  
-    w = spr.get_width()
+    oy = y + TILE - 32
+    ox = x
+    ctx.screen.blit(spr, (ox, oy))
 
-    if side == "L":
-        ctx.screen.blit(spr, (x - w, y - extra))   
-    else:
-        ctx.screen.blit(spr, (x + TILE, y - extra))  
+def draw_corner_top_left(ctx, x, y):
+    spr = _try_load(ctx, "wall_corner_top_left_76x76")
+    if not spr:
+        return
+    SIDE_OFFSET = 43 
+    ox = x - SIDE_OFFSET
+    oy = y - (spr.get_height() - TILE)
+    ctx.screen.blit(spr, (ox, oy))
+
+
+def draw_corner_top_right(ctx, x, y):
+    spr = _try_load(ctx, "wall_corner_top_right_76x76")
+    if not spr:
+        return
+    SIDE_OFFSET = 43 
+    ox = x + TILE - spr.get_width() + SIDE_OFFSET
+    oy = y - (spr.get_height() - TILE)
+    ctx.screen.blit(spr, (ox, oy))
+
+
+def draw_corner_bottom_left(ctx, x, y):
+    spr = _try_load(ctx, "wall_corner_bottom_left_76x76")
+    if not spr:
+        return
+    SIDE_OFFSET = 43  
+    ox = x - SIDE_OFFSET
+    oy = y - (spr.get_height() - TILE) + 40
+    ctx.screen.blit(spr, (ox, oy))
+
+
+def draw_corner_bottom_right(ctx, x, y):
+    spr = _try_load(ctx, "wall_corner_bottom_right_76x76")
+    if not spr:
+        return
+    SIDE_OFFSET = 43 
+    ox = x + TILE - spr.get_width() + SIDE_OFFSET
+    oy = y - (spr.get_height() - TILE) + 43
+    ctx.screen.blit(spr, (ox, oy))
 
 def _try_load(ctx, name):
     try:
-        return ctx.images.load(name)  
-    except Exception:
+        return ctx.images.load(name) 
+    except Exception as e:
+        print(f"[IMG] missing '{name}.png' ? -> {e}")
         return None
-
-def draw_wall32(ctx, x, y):
-    spr = _try_load(ctx, "wall")
-    if spr:
-        ctx.screen.blit(spr, (x, y))
-    else:
-        from pygame import Rect
-        ctx.screen.draw.filled_rect(Rect(x, y, TILE, TILE), (70,70,70))
-
 
 
 def draw_wall_top_32x76(ctx, x, y):
@@ -197,3 +157,113 @@ def get_extra_wall_top(ctx):
     else:
         _TOP_CAP_EXTRA = 0
     return _TOP_CAP_EXTRA
+
+DOOR_W = 64
+DOOR_H = 76
+DOOR_OVERHANG_Y = DOOR_H - TILE  
+DOOR_SIDE_OFFSET = 43 
+
+SIDE_INSET_PX = TILE - DOOR_W + DOOR_SIDE_OFFSET  
+DOOR_VERT_TOP_ADJUST = DOOR_OVERHANG_Y - TILE     
+
+def draw_closed_door(ctx, variant, x, y):
+    name_by_variant = {
+        "UP":    "closeddoor_up",
+        "DOWN":  "closeddoor_down",
+        "LEFT":  "closeddoor_left",
+        "RIGHT": "closeddoor_right",
+    }
+    spr = _try_load(ctx, name_by_variant.get(variant))
+    if not spr:
+        return
+    extra_h = spr.get_height() - TILE 
+
+    if variant == "UP":
+        ox = x
+        oy = y - extra_h
+    elif variant == "DOWN":
+        ox = x
+        oy = y - extra_h + 44
+    elif variant == "LEFT":
+        ox = x - DOOR_SIDE_OFFSET
+        oy = y - extra_h + 32
+    else:  
+        ox = x + TILE - spr.get_width() + DOOR_SIDE_OFFSET
+        oy = y - extra_h + 32
+    ctx.screen.blit(spr, (ox, oy))
+
+def draw_open_door(ctx, variant, x, y):
+    name_by_variant = {
+        "UP": "opendoor_up",
+        "DOWN": "opendoor_down",
+        "LEFT": "opendoor_left",
+        "RIGHT": "opendoor_right",
+    }
+    spr = _try_load(ctx, name_by_variant.get(variant))
+    if not spr:
+        return
+
+    extra_h = spr.get_height() - TILE  
+
+    if variant == "UP":
+        ox = x
+        oy = y - extra_h
+    elif variant == "DOWN":
+        ox = x
+        oy = y - extra_h + 44
+    elif variant == "LEFT":
+        ox = x - DOOR_SIDE_OFFSET
+        oy = y - extra_h + 32
+    else:  
+        ox = x + TILE - spr.get_width() + DOOR_SIDE_OFFSET
+        oy = y - extra_h + 32
+
+    ctx.screen.blit(spr, (ox, oy))
+
+def door_draw_offset(variant, base_x, base_y):
+    if variant == "UP":
+        return base_x, base_y - DOOR_OVERHANG_Y
+    if variant == "DOWN":
+        return base_x, base_y  
+    if variant == "LEFT":
+        return base_x - SIDE_INSET_PX, base_y - DOOR_VERT_TOP_ADJUST
+    return base_x + SIDE_INSET_PX, base_y - DOOR_VERT_TOP_ADJUST   
+
+def door_bbox_px(variant, base_x, base_y):
+    ox, oy = door_draw_offset(variant, base_x, base_y)
+    return ox, oy, DOOR_W, DOOR_H
+
+
+def draw_hall_border(ctx, x, y, side: str):
+  
+    if side == "L":
+        spr = _try_load(ctx, "wall_hall_updown") 
+        if spr:
+            ctx.screen.blit(spr, (x - spr.get_width(), y))
+        else:
+            ctx.screen.draw.filled_rect(Rect(x - 12, y, 12, TILE), (80, 90, 100))
+        return
+
+    if side == "R":
+        spr = _try_load(ctx, "wall_hall_updown") 
+        if spr:
+            ctx.screen.blit(spr, (x + TILE, y))
+        else:
+            ctx.screen.draw.filled_rect(Rect(x + TILE, y, 12, TILE), (80, 90, 100))
+        return
+
+    if side == "U":
+        spr = _try_load(ctx, "wall_hall_leftright") 
+        if spr:
+            ctx.screen.blit(spr, (x, y - spr.get_height()))
+        else:
+            ctx.screen.draw.filled_rect(Rect(x, y - 12, TILE, 12), (80, 90, 100))
+        return
+
+    if side == "D":
+        spr = _try_load(ctx, "wall_hall_leftright")   
+        if spr:
+            ctx.screen.blit(spr, (x, y + TILE))
+        else:
+            ctx.screen.draw.filled_rect(Rect(x, y + TILE, TILE, 12), (80, 90, 100))
+        return

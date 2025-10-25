@@ -15,7 +15,7 @@ class Room:
         if gy < 0 or gy >= len(self.grid): return False
         if gx < 0 or gx >= len(self.grid[gy]): return False
         return self.grid[gy][gx] == int(tiles.Tile.WALL)
-
+    
     @classmethod
     def from_ascii(cls, name: str, debug: bool = False):
         map_path = os.path.join(MAP_DIR, name + ".txt")
@@ -26,7 +26,7 @@ class Room:
                 os.path.join(os.getcwd(), "maps", name + ".txt"),
             ]
             raise FileNotFoundError(
-                "Nu am găsit harta '{}'. Am încercat:\n - {}".format(
+                "Did not found map '{}'. tryed:\n - {}".format(
                     name, "\n - ".join(tried)
                 )
             )
@@ -58,8 +58,8 @@ class Room:
         if debug:
             h = len(grid)
             w = len(grid[0]) if grid else 0
-            print("[ASCII] folosesc harta:", map_path)
-            print("[ASCII] dimensiuni: {}×{} tiles (TILE={})".format(w, h, tiles.TILE))
+            print("Using map:", map_path)
+            print("Dimensions: {}×{} tiles (TILE={})".format(w, h, tiles.TILE))
             for sx, sy in [(0,0), (1,0), (0,1), (5,5)]:
                 if sy < h and sx < len(grid[sy]):
                     tid = grid[sy][sx]
@@ -79,139 +79,144 @@ class Room:
         ox, oy = cam_offset
         ts = tiles.TILE
         sw, sh = ctx.screen.width, ctx.screen.height
-        max_x = len(self.grid[0]) - 1
-        max_y = len(self.grid) - 1
+
+        H = len(self.grid)
+        W = len(self.grid[0]) if H else 0
+        if H == 0 or W == 0:
+            return
+
+        max_x = W - 1
+        max_y = H - 1
 
         gx0 = max(0, (-ox) // ts)
         gy0 = max(0, (-oy) // ts)
         gx1 = min(max_x, (sw - 1 - ox) // ts)
         gy1 = min(max_y, (sh - 1 - oy) // ts)
 
-        extra = tiles.get_extra_wall_top(ctx)         
-        extra_rows = (extra + ts - 1) // ts            
-        gy0_tall   = max(0, gy0 - extra_rows)
+        vpad = tiles.get_extra_wall_top(ctx) or 0  
+        hpad = 48                                  
 
-        if not hasattr(self, "_dbg_once"):
-            self._dbg_once = True
-            print("[TOP EXTRA measured from sprite] =", extra)
+        wx0 = max(0, int((-ox - hpad) // ts))
+        wy0 = max(0, int((-oy - vpad) // ts))
+        wx1 = min(max_x, int((sw - 1 - ox + hpad) // ts))
+        wy1 = min(max_y, int((sh - 1 - oy + vpad) // ts))
 
-        top_gy0 = max(0, int(( -oy - ts) // ts) - 1)               
-        top_gy1 = min(max_y, int(( sh - oy + extra) // ts) + 1)     
-
-        side_px = 12
-        top_gx0 = max(0, int(( -ox - side_px) // ts))
-        top_gx1 = min(max_x, int(((sw - 1 - ox + side_px) // ts)))
-
-        view_top    = 0
-        view_bottom = sh
-
-        H = len(self.grid)
-        W = len(self.grid[0])
-
+        # Floor
         for gy in range(gy0, gy1 + 1):
             row = self.grid[gy]
             for gx in range(gx0, gx1 + 1):
                 tid = row[gx]
-                if tiles.Tile(tid) in (tiles.Tile.VOID, tiles.Tile.WALL):
+                if tiles.Tile(tid) in (tiles.Tile.VOID, tiles.Tile.WALL, tiles.Tile.DOOR):
                     continue
-                sx = gx * ts + ox
-                sy = gy * ts + oy
-                tiles.draw_tile(ctx, tid, sx, sy)
-
-
+                tiles.draw_tile(ctx, tid, gx * ts + ox, gy * ts + oy)
+        
         for gy in range(gy0, gy1 + 1):
             for gx in range(gx0, gx1 + 1):
-                tid = self.grid[gy][gx]
-                if tiles.Tile(tid) != tiles.Tile.WALL:
+                if tiles.Tile(self.grid[gy][gx]) != tiles.Tile.HALL:
                     continue
 
-                north = self.grid[gy - 1][gx] if gy > 0 else int(tiles.Tile.VOID)
-                south = self.grid[gy + 1][gx] if gy + 1 < H else int(tiles.Tile.VOID)
+                # Neighbours
+                up    = self.grid[gy-1][gx] if gy > 0 else int(tiles.Tile.VOID)
+                down  = self.grid[gy+1][gx] if gy+1 < H else int(tiles.Tile.VOID)
+                left  = self.grid[gy][gx-1] if gx > 0 else int(tiles.Tile.VOID)
+                right = self.grid[gy][gx+1] if gx+1 < W else int(tiles.Tile.VOID)
 
-                is_inside = lambda t: t in (int(tiles.Tile.FLOOR), int(tiles.Tile.DOOR))
+                sx = gx * tiles.TILE + ox
+                sy = gy * tiles.TILE + oy
 
-                if south == int(tiles.Tile.VOID) and is_inside(north):
-                    sx = gx * ts + ox
-                    sy = gy * ts + oy
+                if left  == int(tiles.Tile.VOID): tiles.draw_hall_border(ctx, sx, sy, "L")
+                if right == int(tiles.Tile.VOID): tiles.draw_hall_border(ctx, sx, sy, "R")
+                if up    == int(tiles.Tile.VOID): tiles.draw_hall_border(ctx, sx, sy, "U")
+                if down  == int(tiles.Tile.VOID): tiles.draw_hall_border(ctx, sx, sy, "D")
+
+        def at(x, y, default):
+            if y < 0 or y >= H or x < 0 or x >= W:
+                return default
+            return self.grid[y][x]
+
+        # 2) Walls and corners
+        for gy in range(wy0, wy1 + 1):
+            for gx in range(wx0, wx1 + 1):
+                if tiles.Tile(self.grid[gy][gx]) != tiles.Tile.WALL:
+                    continue
+
+                north = at(gx, gy - 1, int(tiles.Tile.VOID))
+                south = at(gx, gy + 1, int(tiles.Tile.VOID))
+                left  = at(gx - 1, gy, int(tiles.Tile.VOID))
+                right = at(gx + 1, gy, int(tiles.Tile.VOID))
+
+                sx = gx * ts + ox
+                sy = gy * ts + oy
+
+                if north != int(tiles.Tile.WALL) and south in (int(tiles.Tile.FLOOR), int(tiles.Tile.DOOR)):
+                    tiles.draw_wall_top_32x76(ctx, sx, sy)
+
+                if south == int(tiles.Tile.VOID) and north in (int(tiles.Tile.FLOOR), int(tiles.Tile.DOOR)):
                     tiles.draw_wall_bottom(ctx, sx, sy)
 
-        def _is_south_edge(px, py):
-            if px < 0 or py < 0 or py >= H or px >= W:
-                return False
-            if self.grid[py][px] != int(tiles.Tile.WALL):
-                return False
-            north = self.grid[py - 1][px] if py > 0 else int(tiles.Tile.VOID)
-            south = self.grid[py + 1][px] if py + 1 < H else int(tiles.Tile.VOID)
-            is_inside = (north == int(tiles.Tile.FLOOR)) or (north == int(tiles.Tile.DOOR))
-            return (south == int(tiles.Tile.VOID)) and is_inside
-
-        for gy in range(gy0, gy1 + 1):
-            for gx in range(gx0, gx1 + 1):
-                if self.grid[gy][gx] != int(tiles.Tile.WALL):
-                    continue
-                if not _is_south_edge(gx, gy):
-                    continue
-
-                sx = gx * ts + ox
-                sy = gy * ts + oy
-
-                if not _is_south_edge(gx - 1, gy):
-                    tiles.draw_wall_bottom_end(ctx, sx, sy, "L")
-                if not _is_south_edge(gx + 1, gy):
-                    tiles.draw_wall_bottom_end(ctx, sx, sy, "R")
-
-        for gy in range(gy0, gy1 + 1):
-            for gx in range(gx0, gx1 + 1):
-                tid = self.grid[gy][gx]
-                if tiles.Tile(tid) != tiles.Tile.WALL:
-                    continue
-
-                left_tid  = self.grid[gy][gx-1] if gx > 0 else int(tiles.Tile.VOID)
-                right_tid = self.grid[gy][gx+1] if gx + 1 < W else int(tiles.Tile.VOID)
-
-                is_void   = lambda t: t == int(tiles.Tile.VOID)
-                is_inside = lambda t: t in (int(tiles.Tile.FLOOR), int(tiles.Tile.DOOR))
-
-                sx = gx * ts + ox
-                sy = gy * ts + oy
-
-                if is_void(left_tid) and is_inside(right_tid):
+                if left == int(tiles.Tile.VOID) and right in (int(tiles.Tile.FLOOR), int(tiles.Tile.DOOR)):
                     tiles.draw_wall_side_12x32(ctx, sx, sy, "L")
 
-                if is_void(right_tid) and is_inside(left_tid):
+                if right == int(tiles.Tile.VOID) and left in (int(tiles.Tile.FLOOR), int(tiles.Tile.DOOR)):
                     tiles.draw_wall_side_12x32(ctx, sx, sy, "R")
 
-        for gy in range(top_gy0, top_gy1 + 1):
-            for gx in range(top_gx0, top_gx1 + 1):
-                tid = self.grid[gy][gx]
-                if tiles.Tile(tid) != tiles.Tile.WALL:
-                    continue
+                VOID = int(tiles.Tile.VOID)
+                if (north == VOID and left  == VOID): tiles.draw_corner_top_left(ctx, sx, sy)
+                if (north == VOID and right == VOID): tiles.draw_corner_top_right(ctx, sx, sy)
+                if (south == VOID and left  == VOID): tiles.draw_corner_bottom_left(ctx, sx, sy)
+                if (south == VOID and right == VOID): tiles.draw_corner_bottom_right(ctx, sx, sy)
+        
+        VOID = int(tiles.Tile.VOID)
+        FLOOR = int(tiles.Tile.FLOOR)
+        DOOR  = int(tiles.Tile.DOOR)
+        HALL  = int(tiles.Tile.HALL)
+        OUTSIDE = (VOID, HALL)
 
-                north_is_wall = (gy > 0 and self.grid[gy - 1][gx] == int(tiles.Tile.WALL))
-                south = self.grid[gy + 1][gx] if gy + 1 < H else int(tiles.Tile.VOID)
-                south_is_interior = (south == int(tiles.Tile.FLOOR)) or (south == int(tiles.Tile.DOOR))
-                if north_is_wall or not south_is_interior:
-                    continue
+        door_state = getattr(self, "door_state", None) 
 
-                sx = gx * ts + ox
-                sy = gy * ts + oy
+        for key, r in self.doors.items():
+            orient, _kx, _ky = key
 
-                spr_top    = sy - extra
-                spr_bottom = sy + ts
-                if spr_bottom <= 0 or spr_top >= sh:
-                    continue
+            dx = r.x // tiles.TILE
+            dy = r.y // tiles.TILE
 
-                tiles.draw_wall_top_32x76(ctx, sx, sy)
+            def at(x, y, default):
+                if y < 0 or y >= len(self.grid) or x < 0 or x >= len(self.grid[0]):
+                    return default
+                return self.grid[y][x]
 
-                def _is_north_cap_at(px, py):
-                    if px < 0 or py < 0 or py >= H or px >= W: return False
-                    if self.grid[py][px] != int(tiles.Tile.WALL): return False
-                    n_wall = (py > 0 and self.grid[py - 1][px] == int(tiles.Tile.WALL))
-                    s = self.grid[py + 1][px] if py + 1 < H else int(tiles.Tile.VOID)
-                    s_in = (s == int(tiles.Tile.FLOOR)) or (s == int(tiles.Tile.DOOR))
-                    return (not n_wall) and s_in
+            if orient == "H":
+                if at(dx, dy - 1, VOID) in OUTSIDE:
+                    facing = "UP"
+                elif at(dx, dy + 1, VOID) in OUTSIDE:
+                    facing = "DOWN"
+                else:
+                    facing = "UP"
+            else:  
+                if at(dx - 1, dy, VOID) in OUTSIDE:
+                    facing = "LEFT"
+                elif at(dx + 1, dy, VOID) in OUTSIDE:
+                    facing = "RIGHT"
+                else:
+                    facing = "LEFT"
 
-                if not _is_north_cap_at(gx - 1, gy):
-                    tiles.draw_wall_top_end(ctx, sx, sy, "L")
-                if not _is_north_cap_at(gx + 1, gy):
-                    tiles.draw_wall_top_end(ctx, sx, sy, "R")
+            bx, by, bw, bh = tiles.door_bbox_px(facing, r.x, r.y)
+            sx0 = bx + ox; sy0 = by + oy
+            sx1 = sx0 + bw; sy1 = sy0 + bh
+
+            MARGIN_LEFT   = 12
+            MARGIN_RIGHT  = 12
+            MARGIN_TOP    = 12
+            MARGIN_BOTTOM = 12
+
+            if facing == "LEFT":
+                MARGIN_RIGHT = 48 
+
+            if (sx1 < -MARGIN_LEFT) or (sx0 > sw + MARGIN_RIGHT) or (sy1 < -MARGIN_TOP) or (sy0 > sh + MARGIN_BOTTOM):
+                continue
+
+            is_open = True if door_state is None else door_state.get(key, True)
+            if is_open:
+                tiles.draw_open_door(ctx, facing, r.x + ox, r.y + oy)
+            else:
+                tiles.draw_closed_door(ctx, facing, r.x + ox, r.y + oy)

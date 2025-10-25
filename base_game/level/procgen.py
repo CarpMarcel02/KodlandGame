@@ -3,8 +3,21 @@ import random
 from pygame import Rect
 from . import tiles
 from .room import Room
+import math
 
-ROOM_GAP = 1 
+
+ROOM_GAP_TILES = int((76 * 2) / tiles.TILE) 
+ROOM_GAP = ROOM_GAP_TILES
+
+
+SIDE_OVERHANG_PX = 43  
+TOP_OVERHANG_PX  = 44  
+
+PAD_X_TILES = math.ceil(SIDE_OVERHANG_PX / tiles.TILE)  
+PAD_Y_TILES = math.ceil(TOP_OVERHANG_PX  / tiles.TILE)  
+
+ROOM_GAP_X = PAD_X_TILES * 2  
+ROOM_GAP_Y = PAD_Y_TILES * 2 
 
 def _overlap(a, b):
     return not (a["x"] + a["w"] <= b["x"] or
@@ -14,23 +27,63 @@ def _overlap(a, b):
 
 def _place_adjacent(base, side, w, h):
     if side == "U":
+        gap = ROOM_GAP_Y
         cx = base["x"] + base["w"] // 2
         x  = cx - w // 2
-        y  = base["y"] - h - ROOM_GAP     
+        y  = base["y"] - h - gap
     elif side == "D":
+        gap = ROOM_GAP_Y
         cx = base["x"] + base["w"] // 2
         x  = cx - w // 2
-        y  = base["y"] + base["h"] + ROOM_GAP
+        y  = base["y"] + base["h"] + gap
     elif side == "L":
+        gap = ROOM_GAP_X
         cy = base["y"] + base["h"] // 2
-        x  = base["x"] - w - ROOM_GAP
+        x  = base["x"] - w - gap
         y  = cy - h // 2
-    else:  # "R"
+    else: 
+        gap = ROOM_GAP_X
         cy = base["y"] + base["h"] // 2
-        x  = base["x"] + base["w"] + ROOM_GAP
+        x  = base["x"] + base["w"] + gap
         y  = cy - h // 2
     return {"x": x, "y": y, "w": w, "h": h}
 
+def _overlap_padded(a, b, pad_x, pad_y):
+    ax0 = a["x"] - pad_x; ay0 = a["y"] - pad_y
+    ax1 = a["x"] + a["w"] + pad_x; ay1 = a["y"] + a["h"] + pad_y
+    bx0 = b["x"] - pad_x; by0 = b["y"] - pad_y
+    bx1 = b["x"] + b["w"] + pad_x; by1 = b["y"] + b["h"] + pad_y
+    return not (ax1 <= bx0 or bx1 <= ax0 or ay1 <= by0 or by1 <= ay0)
+
+def _print_ascii_grid(grid, door_marks=None, title="GRID"):
+    H = len(grid)
+    W = len(grid[0]) if H else 0
+
+    VOID  = int(tiles.Tile.VOID)
+    FLOOR = int(tiles.Tile.FLOOR)
+    WALL  = int(tiles.Tile.WALL)
+    DOOR  = int(tiles.Tile.DOOR)
+
+    cmap = {VOID: " ", FLOOR: ".", WALL: "#", DOOR: "D"}
+
+    buf = [list("".join(cmap.get(grid[y][x], "?") for x in range(W))) for y in range(H)]
+
+    if door_marks:
+        for gx, gy, orient in door_marks:
+            if orient == "H":
+                if 0 <= gy < H and 0 <= gx < W:
+                    buf[gy][gx] = "═"
+                if 0 <= gy < H and 0 <= gx+1 < W:
+                    buf[gy][gx+1] = "═"
+            else: 
+                if 0 <= gy < H and 0 <= gx < W:
+                    buf[gy][gx] = "║"
+                if 0 <= gy+1 < H and 0 <= gx < W:
+                    buf[gy+1][gx] = "║"
+
+    print(f"\n--- {title} {W}x{H} ---")
+    for row in buf:
+        print("".join(row))
 
 def generate_world(seed=None, target_rooms=6,
                    first_size=(20, 15),
@@ -60,9 +113,10 @@ def generate_world(seed=None, target_rooms=6,
 
             cand = _place_adjacent(base, side, w, h)
 
+            pad_x, pad_y = PAD_X_TILES, PAD_Y_TILES  
             bad = False
             for r in rooms:
-                if _overlap(cand, r):
+                if _overlap_padded(cand, r, pad_x, pad_y):
                     bad = True
                     break
             if bad:
@@ -91,7 +145,11 @@ def generate_world(seed=None, target_rooms=6,
     for r in rooms:
         r["x"] += shift_x
         r["y"] += shift_y
-
+    print("\n=== ROOM DEBUG INFO ===")
+    for i, r in enumerate(rooms):
+        x, y, w, h = r["x"], r["y"], r["w"], r["h"]
+        print(f"[ROOM {i}] pos=({x},{y}) size=({w}x{h})")
+        print(f"         corners: TL=({x},{y}) TR=({x+w-1},{y}) BL=({x},{y+h-1}) BR=({x+w-1},{y+h-1})")
     W = max_x + shift_x
     H = max_y + shift_y
 
@@ -110,6 +168,8 @@ def generate_world(seed=None, target_rooms=6,
                 grid[y][x] = WALL if is_border else FLOOR
 
     door_rects = []
+    door_marks = []
+    doors_info_tmp = []
     for (ai, bi, side) in links:
         a = rooms[ai]
         b = rooms[bi]
@@ -123,14 +183,21 @@ def generate_world(seed=None, target_rooms=6,
         elif side == "R" and not (a["x"] + a["w"] == b["x"]):
             a, b = b, a; side = "L"
 
-        res = _carve_double_door(grid, a, b, side, W, H, DOOR, tiles.TILE)
-        if res:
-            gx, gy, orient = res
+        res_list = _carve_double_door(grid, a, b, side, W, H, DOOR, tiles.TILE)
+        if not res_list:
+            continue
+
+        _fill_corridor_between_doors(grid, res_list, W, H, int(tiles.Tile.HALL))
+
+        for (gx, gy, orient) in res_list:
+            door_marks.append((gx, gy, orient))
             if orient == "H":
                 r = Rect(gx * tiles.TILE, gy * tiles.TILE, 2 * tiles.TILE, tiles.TILE)
-            else:
+            else:  
                 r = Rect(gx * tiles.TILE, gy * tiles.TILE, tiles.TILE, 2 * tiles.TILE)
             door_rects.append((orient, r))
+            doors_info_tmp.append((orient, gx, gy, r, (ai, bi)))
+
 
     first = rooms[0]
     spawn_xy = ((first["x"] + first["w"] // 2) * tiles.TILE,
@@ -141,10 +208,64 @@ def generate_world(seed=None, target_rooms=6,
         gx, gy = r.x // tiles.TILE, r.y // tiles.TILE
         doors[(orient, gx, gy)] = r
     PAD = 3  
+    _print_ascii_grid(grid, door_marks, title="GRID BEFORE PAD")
+    
+    
     grid, doors, spawn_xy = _pad_world(grid, doors, spawn_xy, PAD, tiles.TILE, VOID)
 
-    return Room(grid=grid, doors=doors, spawn_xy=spawn_xy)
+    rooms_meta = []
+    for i, r in enumerate(rooms):
+        rx = r["x"] + PAD
+        ry = r["y"] + PAD
+        rw = r["w"]
+        rh = r["h"]
+        rect_full_g   = Rect(rx, ry, rw, rh)
+        rect_inner_g  = Rect(rx + 1, ry + 1, max(0, rw - 2), max(0, rh - 2))
+        cx = rect_inner_g.centerx
+        cy = rect_inner_g.centery
+        rooms_meta.append({
+            "id": i,
+            "rect_g": rect_full_g,      
+            "rect_inner_g": rect_inner_g,
+            "center_g": (cx, cy),
+            "doors": [],                
+            "state": "cleared" if i == 0 else "unvisited"
+        })
 
+    adj = {i: [] for i in range(len(rooms))}
+    for (ai, bi, _side) in links:
+        if bi not in adj[ai]: adj[ai].append(bi)
+        if ai not in adj[bi]: adj[bi].append(ai)
+
+    door_meta = {} 
+    for orient, gx, gy, _rect_before_pad, (ai, bi) in doors_info_tmp:
+        key = (orient, gx + PAD, gy + PAD) if False else (orient, gx, gy)
+ 
+        key = (orient, gx, gy)
+
+        rect_px = doors.get(key)
+        if rect_px is None:
+            continue
+
+        door_meta[key] = {
+            "rect_px": rect_px,  
+            "orient": orient,       
+            "rooms": (ai, bi)       
+        }
+        rooms_meta[ai]["doors"].append(key)
+        rooms_meta[bi]["doors"].append(key)
+
+    door_marks_padded = [(gx + PAD, gy + PAD, orient) for (gx, gy, orient) in door_marks]
+
+    _print_ascii_grid(grid, door_marks_padded, title="GRID AFTER PAD")
+    
+    room = Room(grid=grid, doors=doors, spawn_xy=spawn_xy)
+    room.rooms_meta = rooms_meta   
+    room.door_meta  = door_meta    
+    room.adj        = adj          
+    room.start_room_id = 0        
+
+    return room
 def _pad_world(grid, doors, spawn_xy, pad, TILE, VOID):
         old_h = len(grid)
         old_w = len(grid[0]) if old_h else 0
@@ -172,14 +293,13 @@ def _pad_world(grid, doors, spawn_xy, pad, TILE, VOID):
         return new_grid, new_doors, (sx, sy)
 
 def _carve_double_door(grid, a, b, side, W, H, DOOR, TILE):
-
     if side in ("U", "D"):
         start = max(a["x"] + 1, b["x"] + 1)
         end   = min(a["x"] + a["w"] - 2, b["x"] + b["w"] - 2)
         if start > end:
             return None
         x0 = (start + end) // 2
-        x0 = max(1, min(W - 3, x0))  
+        x0 = max(1, min(W - 3, x0))
 
         y_a = a["y"] if side == "U" else a["y"] + a["h"] - 1
         y_b = b["y"] + b["h"] - 1 if side == "U" else b["y"]
@@ -189,8 +309,7 @@ def _carve_double_door(grid, a, b, side, W, H, DOOR, TILE):
                 if 0 <= y_a < H: grid[y_a][x] = DOOR
                 if 0 <= y_b < H: grid[y_b][x] = DOOR
 
-        gy = min(y_a, y_b)
-        return (x0, gy, "H")
+        return [(x0, y_a, "H"), (x0, y_b, "H")]
 
     else:
         start = max(a["y"] + 1, b["y"] + 1)
@@ -198,7 +317,7 @@ def _carve_double_door(grid, a, b, side, W, H, DOOR, TILE):
         if start > end:
             return None
         y0 = (start + end) // 2
-        y0 = max(1, min(H - 3, y0)) 
+        y0 = max(1, min(H - 3, y0))
 
         x_a = a["x"] if side == "L" else a["x"] + a["w"] - 1
         x_b = b["x"] + b["w"] - 1 if side == "L" else b["x"]
@@ -208,7 +327,28 @@ def _carve_double_door(grid, a, b, side, W, H, DOOR, TILE):
                 if 0 <= x_a < W: grid[y][x_a] = DOOR
                 if 0 <= x_b < W: grid[y][x_b] = DOOR
 
-        gx = min(x_a, x_b)
-        return (gx, y0, "V")
-    
-    
+        return [(x_a, y0, "V"), (x_b, y0, "V")]
+
+def _fill_corridor_between_doors(grid, res_list, W, H, HALL):
+
+    if not res_list or len(res_list) < 2:
+        return
+
+    (x1, y1, o1), (x2, y2, o2) = res_list[0], res_list[1]
+    assert o1 == o2, "both door halves must have same orientation"
+    if o1 == "H":
+        x0 = x1
+        y_start = min(y1, y2) + 1
+        y_stop  = max(y1, y2)    
+        for y in range(y_start, y_stop):
+            for x in (x0, x0 + 1):
+                if 0 <= x < W and 0 <= y < H:
+                    grid[y][x] = HALL
+    else:
+        y0 = y1
+        x_start = min(x1, x2) + 1
+        x_stop  = max(x1, x2)
+        for x in range(x_start, x_stop):
+            for y in (y0, y0 + 1):
+                if 0 <= x < W and 0 <= y < H:
+                    grid[y][x] = HALL
