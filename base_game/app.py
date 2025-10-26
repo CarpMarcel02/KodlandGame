@@ -10,8 +10,16 @@ class SceneManager:
     def change(self, name, *args, **kwargs):
         if self.current and hasattr(self.current, "on_exit"):
             self.current.on_exit()
+
+        same_scene = self.current is self._scenes.get(name)
         self.current = self._scenes[name]
-        if hasattr(self.current, "on_enter"):
+        self.current._manager = self
+
+        if kwargs.pop("resume", False) and hasattr(self.current, "on_resume"):
+            self.current.on_resume(*args, **kwargs)
+        elif same_scene and hasattr(self.current, "on_resume"):
+            self.current.on_resume(*args, **kwargs)
+        elif hasattr(self.current, "on_enter"):
             self.current.on_enter(*args, **kwargs)
 
     def update(self, dt, ctx):

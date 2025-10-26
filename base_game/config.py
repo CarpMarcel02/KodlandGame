@@ -1,3 +1,3 @@
 WIDTH, HEIGHT = 960, 540
-TITLE = "Kodland Rogue/Platformer"
+TITLE = "Marcel`s Game"
 FPS = 60
