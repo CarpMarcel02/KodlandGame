@@ -1,2 +1,2 @@
-pgzero
-pygame
+pygame>=2.5,<2.6
+pgzero>=1.2,<1.3
