@@ -1,4 +1,4 @@
-Dungeon Rush (PGZero)
+
 
 A fast top-down dungeon crawler built in Python with Pygame Zero. Each run generates a procedural grid of connected rooms. Entering a room locks the doors, spawns enemies, and doors reopen only after you clear the room. Tight movement, solid collisions, directional sprite animations, projectiles for both player and enemies, a simple HUD, plus Game Over and You Win scenes.
 
